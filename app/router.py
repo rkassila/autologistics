@@ -20,8 +20,13 @@ async def extract_document(file: UploadFile = File(...)) -> DocumentExtractRespo
     pdf_content = await file.read()
     document_hash = compute_document_hash(pdf_content)
 
-    if db.get_document_by_hash(document_hash):
-        raise HTTPException(status_code=400, detail="Document already exists")
+    # Check database - only block if already saved
+    existing_doc = db.get_document_by_hash(document_hash)
+    if existing_doc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document already exists in database (ID: {existing_doc.id})"
+        )
 
     # Upload to storage (optional)
     storage_url = None

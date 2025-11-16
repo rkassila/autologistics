@@ -3,6 +3,10 @@
 import streamlit as st
 import requests
 import os
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080/api/v1")
 
@@ -27,7 +31,7 @@ if uploaded_file and st.session_state.extracted_data is None:
                 if response.status_code == 200:
                     st.session_state.extracted_data = response.json()
                     st.session_state.document_hash = st.session_state.extracted_data.get("document_hash")
-                    st.rerun()
+                    st.experimental_rerun()
                 else:
                     st.error(response.json().get("detail", "Error"))
             except Exception as e:
@@ -41,7 +45,7 @@ if st.session_state.extracted_data:
         st.error(result.get("validation_message", "Not a valid logistics document"))
         if st.button("Try Again"):
             st.session_state.extracted_data = None
-            st.rerun()
+            st.experimental_rerun()
     else:
         fields = result.get("structured_fields", {})
 
@@ -73,7 +77,7 @@ if st.session_state.extracted_data:
 
             col1, col2 = st.columns(2)
             with col1:
-                save_btn = st.form_submit_button("Save", type="primary")
+                save_btn = st.form_submit_button("Save")
             with col2:
                 cancel_btn = st.form_submit_button("Cancel")
 
@@ -97,7 +101,7 @@ if st.session_state.extracted_data:
                             st.session_state.extracted_data = None
                             st.session_state.document_hash = None
                             if st.button("Upload Another"):
-                                st.rerun()
+                                st.experimental_rerun()
                         else:
                             st.error(response.json().get("detail", "Error saving"))
                     except Exception as e:
@@ -106,4 +110,4 @@ if st.session_state.extracted_data:
             if cancel_btn:
                 st.session_state.extracted_data = None
                 st.session_state.document_hash = None
-                st.rerun()
+                st.experimental_rerun()
