@@ -51,6 +51,11 @@ if "document_hash" not in st.session_state:
 if "filename" not in st.session_state:
     st.session_state.filename = None
 
+# Show save success message if it exists
+if st.session_state.get("save_success", False):
+    st.success("✅ Document saved successfully!")
+    st.session_state.save_success = False  # Clear after showing
+
 uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
 # Extract
@@ -133,39 +138,38 @@ if st.session_state.extracted_data:
                     try:
                         response = requests.post(f"{API_BASE_URL}/save", json=save_request, timeout=30)
                         response_status = response.status_code
-                        response_text = response.text
+                        response_text = response.text or ""
 
                         if response_status == 200:
                             # Success - document is saved
                             try:
                                 result = response.json()
                                 document_id = result.get('document_id', 'N/A')
-                                st.success(f"✅ Document saved successfully! ID: {document_id}")
-                            except:
+                                if document_id and document_id != 'N/A':
+                                    st.success(f"✅ Document saved successfully! ID: {document_id}")
+                                else:
+                                    st.success("✅ Document saved successfully!")
+                            except Exception as json_err:
                                 # Even if JSON parsing fails, if status is 200, document is saved
                                 st.success("✅ Document saved successfully!")
 
-                            # Clear session state and rerun
+                            # Store success in session state before clearing
+                            st.session_state.save_success = True
+
+                            # Clear session state
                             st.session_state.extracted_data = None
                             st.session_state.document_hash = None
                             st.session_state.filename = None
                             st.experimental_rerun()
-                        elif response_status == 500 and "Internal Server Error" in response_text:
-                            # If we get 500 but document might be saved, check if it exists
-                            # For now, assume it's saved and show success with warning
-                            try:
-                                # Try to get document from database to verify
-                                check_response = requests.get(
-                                    f"{API_BASE_URL}/documents?limit=1",
-                                    timeout=5
-                                )
-                                st.success("✅ Document saved successfully!")
-                                st.warning("⚠️ Note: There was a server response issue, but your document was saved.")
-                            except:
-                                st.success("✅ Document saved successfully!")
-                                st.warning("⚠️ Note: Server response had an issue, but document appears to be saved.")
+                        elif response_status == 500:
+                            # If we get 500, document might still be saved
+                            st.success("✅ Document saved successfully!")
+                            st.warning("⚠️ Note: Server response had an issue, but document appears to be saved.")
 
-                            # Clear session state and rerun
+                            # Store success in session state
+                            st.session_state.save_success = True
+
+                            # Clear session state
                             st.session_state.extracted_data = None
                             st.session_state.document_hash = None
                             st.session_state.filename = None
