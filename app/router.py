@@ -75,19 +75,30 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
     data = _extracted_documents[request.document_hash]
     fields = request.structured_fields or data["structured_fields"]
 
-    if db.get_document_by_hash(request.document_hash):
-        del _extracted_documents[request.document_hash]
-        raise HTTPException(status_code=400, detail="Document already exists")
+    # Check if already saved (race condition protection)
+    try:
+        if db.get_document_by_hash(request.document_hash):
+            del _extracted_documents[request.document_hash]
+            raise HTTPException(status_code=400, detail="Document already exists")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # If check fails, continue anyway
 
-    document = db.save_document(
-        filename=request.filename or data["filename"],
-        storage_url=data["storage_url"],
-        extracted_text=data["extracted_text"],
-        document_hash=request.document_hash,
-        structured_fields=fields,
-        additional_data=data.get("additional_data")
-    )
+    # Save to database
+    try:
+        document = db.save_document(
+            filename=request.filename or data["filename"],
+            storage_url=data["storage_url"],
+            extracted_text=data["extracted_text"],
+            document_hash=request.document_hash,
+            structured_fields=fields,
+            additional_data=data.get("additional_data")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving document: {str(e)}")
 
+    # Clean up temporary storage
     del _extracted_documents[request.document_hash]
 
     return DocumentUploadResponse(

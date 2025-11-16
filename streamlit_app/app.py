@@ -48,6 +48,8 @@ if "extracted_data" not in st.session_state:
     st.session_state.extracted_data = None
 if "document_hash" not in st.session_state:
     st.session_state.document_hash = None
+if "filename" not in st.session_state:
+    st.session_state.filename = None
 
 uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
@@ -62,6 +64,7 @@ if uploaded_file and st.session_state.extracted_data is None:
                 if response.status_code == 200:
                     st.session_state.extracted_data = response.json()
                     st.session_state.document_hash = st.session_state.extracted_data.get("document_hash")
+                    st.session_state.filename = uploaded_file.name
                     st.experimental_rerun()
                 else:
                     try:
@@ -124,7 +127,7 @@ if st.session_state.extracted_data:
 
                         save_request = {
                             "document_hash": st.session_state.document_hash,
-                            "filename": uploaded_file.name,
+                            "filename": st.session_state.filename or "unknown.pdf",
                             "structured_fields": clean_fields
                         }
 
@@ -134,6 +137,7 @@ if st.session_state.extracted_data:
                             st.success(f"Saved! Document ID: {response.json().get('document_id')}")
                             st.session_state.extracted_data = None
                             st.session_state.document_hash = None
+                            st.session_state.filename = None
                             if st.button("Upload Another"):
                                 st.experimental_rerun()
                         else:
@@ -147,4 +151,5 @@ if st.session_state.extracted_data:
             if cancel_btn:
                 st.session_state.extracted_data = None
                 st.session_state.document_hash = None
+                st.session_state.filename = None
                 st.experimental_rerun()
