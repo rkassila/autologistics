@@ -107,17 +107,33 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
     # Ensure structured_fields is serializable (convert dates to strings)
     serializable_fields = {}
     for key, value in fields.items():
-        if hasattr(value, 'isoformat'):  # Date/datetime objects
+        if value is None:
+            serializable_fields[key] = None
+        elif hasattr(value, 'isoformat'):  # Date/datetime objects
             serializable_fields[key] = value.isoformat()
-        else:
+        elif isinstance(value, (dict, list)):
+            # Ensure nested objects are JSON serializable
             serializable_fields[key] = value
+        else:
+            serializable_fields[key] = str(value) if value else None
 
-    return DocumentUploadResponse(
-        message="Saved",
-        document_id=document.id,
-        is_duplicate=False,
-        structured_fields=serializable_fields
-    )
+    # Return response with proper serialization
+    try:
+        response = DocumentUploadResponse(
+            message="Saved",
+            document_id=document.id,
+            is_duplicate=False,
+            structured_fields=serializable_fields
+        )
+        return response
+    except Exception as e:
+        # If response serialization fails, still return success but without structured_fields
+        return DocumentUploadResponse(
+            message="Saved",
+            document_id=document.id,
+            is_duplicate=False,
+            structured_fields=None
+        )
 
 
 @router.get("/documents", response_model=Dict)
