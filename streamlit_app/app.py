@@ -13,6 +13,37 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080/api/v1")
 st.set_page_config(page_title="Logistics Document Processor", layout="wide")
 st.title("Logistics Document Automation")
 
+# Check API and database connection
+if "api_status" not in st.session_state:
+    st.session_state.api_status = None
+if "db_status" not in st.session_state:
+    st.session_state.db_status = None
+
+# Check API health on load
+try:
+    health_response = requests.get(f"{API_BASE_URL}/health", timeout=5)
+    if health_response.status_code == 200:
+        health_data = health_response.json()
+        st.session_state.api_status = "connected"
+        st.session_state.db_status = health_data.get("database", "unknown")
+    else:
+        st.session_state.api_status = "error"
+except:
+    st.session_state.api_status = "disconnected"
+
+# Display status
+col1, col2 = st.columns(2)
+with col1:
+    if st.session_state.api_status == "connected":
+        st.success("✅ API Connected")
+    else:
+        st.error("❌ API Disconnected")
+with col2:
+    if st.session_state.db_status == "connected":
+        st.success("✅ Database Connected")
+    else:
+        st.warning("⚠️ Database Disconnected")
+
 if "extracted_data" not in st.session_state:
     st.session_state.extracted_data = None
 if "document_hash" not in st.session_state:
@@ -33,7 +64,10 @@ if uploaded_file and st.session_state.extracted_data is None:
                     st.session_state.document_hash = st.session_state.extracted_data.get("document_hash")
                     st.experimental_rerun()
                 else:
-                    st.error(response.json().get("detail", "Error"))
+                    try:
+                        st.error(response.json().get("detail", "Error"))
+                    except:
+                        st.error(f"Error: {response.text or 'Unknown error'}")
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
@@ -103,7 +137,10 @@ if st.session_state.extracted_data:
                             if st.button("Upload Another"):
                                 st.experimental_rerun()
                         else:
-                            st.error(response.json().get("detail", "Error saving"))
+                            try:
+                                st.error(response.json().get("detail", "Error saving"))
+                            except:
+                                st.error(f"Error: {response.text or 'Unknown error'}")
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
 
