@@ -98,6 +98,70 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
     )
 
 
+@router.get("/documents", response_model=Dict)
+async def list_documents(limit: int = 100, offset: int = 0):
+    """List all documents in database."""
+    with db.get_session() as session:
+        from app.db import LogisticsDocument
+        documents = session.query(LogisticsDocument).order_by(
+            LogisticsDocument.created_at.desc()
+        ).offset(offset).limit(limit).all()
+
+        total = session.query(LogisticsDocument).count()
+
+        return {
+            "total": total,
+            "count": len(documents),
+            "offset": offset,
+            "documents": [
+                {
+                    "id": doc.id,
+                    "filename": doc.filename,
+                    "tracking_number": doc.tracking_number,
+                    "shipper_name": doc.shipper_name,
+                    "receiver_name": doc.receiver_name,
+                    "carrier": doc.carrier,
+                    "shipment_date": str(doc.shipment_date) if doc.shipment_date else None,
+                    "status": doc.status,
+                    "created_at": str(doc.created_at),
+                    "storage_url": doc.storage_url
+                }
+                for doc in documents
+            ]
+        }
+
+
+@router.get("/documents/{document_id}", response_model=Dict)
+async def get_document(document_id: int) -> Dict:
+    """Retrieve a parsed document by ID."""
+    with db.get_session() as session:
+        from app.db import LogisticsDocument
+        document = session.query(LogisticsDocument).filter(LogisticsDocument.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        return {
+            "id": document.id,
+            "filename": document.filename,
+            "tracking_number": document.tracking_number,
+            "shipper_name": document.shipper_name,
+            "shipper_address": document.shipper_address,
+            "receiver_name": document.receiver_name,
+            "receiver_address": document.receiver_address,
+            "carrier": document.carrier,
+            "shipping_method": document.shipping_method,
+            "weight": document.weight,
+            "dimensions": document.dimensions,
+            "status": document.status,
+            "shipment_date": str(document.shipment_date) if document.shipment_date else None,
+            "delivery_date": str(document.delivery_date) if document.delivery_date else None,
+            "special_instructions": document.special_instructions,
+            "storage_url": document.storage_url,
+            "created_at": str(document.created_at),
+            "additional_data": document.additional_data
+        }
+
+
 @router.get("/health")
 async def health_check() -> Dict[str, str]:
     """Health check."""

@@ -10,8 +10,8 @@ load_dotenv()
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080/api/v1")
 
-st.set_page_config(page_title="Logistics Document Processor", layout="wide")
-st.title("Logistics Document Automation")
+st.set_page_config(page_title="Logistics Document Processor", layout="wide", page_icon="📦")
+st.title("📦 Logistics Document Automation")
 
 # Check API and database connection
 if "api_status" not in st.session_state:
