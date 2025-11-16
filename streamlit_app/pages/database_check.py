@@ -55,13 +55,20 @@ try:
                         st.write(f"**Dimensions:** {doc['dimensions']}")
 
                     # View full details button
+                    if f"show_details_{doc['id']}" not in st.session_state:
+                        st.session_state[f"show_details_{doc['id']}"] = False
+
                     if st.button(f"View Full Details", key=f"view_{doc['id']}"):
+                        st.session_state[f"show_details_{doc['id']}"] = not st.session_state[f"show_details_{doc['id']}"]
+
+                    if st.session_state[f"show_details_{doc['id']}"]:
                         try:
                             detail_response = requests.get(f"{API_BASE_URL}/documents/{doc['id']}", timeout=10)
                             if detail_response.status_code == 200:
                                 detail = detail_response.json()
-                                with st.expander(f"Full Details for Document {doc['id']}", expanded=True):
-                                    st.json(detail)
+                                st.markdown("---")
+                                st.subheader(f"Full Details - Document {doc['id']}")
+                                st.json(detail)
                             else:
                                 st.error("Could not fetch details")
                         except Exception as e:

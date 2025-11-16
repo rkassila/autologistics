@@ -134,17 +134,30 @@ if st.session_state.extracted_data:
                         response = requests.post(f"{API_BASE_URL}/save", json=save_request, timeout=30)
 
                         if response.status_code == 200:
-                            st.success(f"Saved! Document ID: {response.json().get('document_id')}")
-                            st.session_state.extracted_data = None
-                            st.session_state.document_hash = None
-                            st.session_state.filename = None
-                            if st.button("Upload Another"):
+                            try:
+                                result = response.json()
+                                document_id = result.get('document_id')
+                                st.success(f"Saved! Document ID: {document_id}")
+                                st.session_state.extracted_data = None
+                                st.session_state.document_hash = None
+                                st.session_state.filename = None
+                                st.experimental_rerun()
+                            except Exception as e:
+                                # Even if JSON parsing fails, document might be saved
+                                st.success("Document saved successfully!")
+                                st.session_state.extracted_data = None
+                                st.session_state.document_hash = None
+                                st.session_state.filename = None
                                 st.experimental_rerun()
                         else:
                             try:
-                                st.error(response.json().get("detail", "Error saving"))
+                                error_detail = response.json().get("detail", "Error saving")
+                                st.error(f"Error: {error_detail}")
                             except:
-                                st.error(f"Error: {response.text or 'Unknown error'}")
+                                error_text = response.text or 'Unknown error'
+                                st.error(f"Error: {error_text}")
+                    except requests.exceptions.RequestException as e:
+                        st.error(f"Network error: {str(e)}")
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
 

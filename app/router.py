@@ -99,13 +99,24 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         raise HTTPException(status_code=500, detail=f"Error saving document: {str(e)}")
 
     # Clean up temporary storage
-    del _extracted_documents[request.document_hash]
+    try:
+        del _extracted_documents[request.document_hash]
+    except KeyError:
+        pass  # Already deleted
+
+    # Ensure structured_fields is serializable (convert dates to strings)
+    serializable_fields = {}
+    for key, value in fields.items():
+        if hasattr(value, 'isoformat'):  # Date/datetime objects
+            serializable_fields[key] = value.isoformat()
+        else:
+            serializable_fields[key] = value
 
     return DocumentUploadResponse(
         message="Saved",
         document_id=document.id,
         is_duplicate=False,
-        structured_fields=fields
+        structured_fields=serializable_fields
     )
 
 
