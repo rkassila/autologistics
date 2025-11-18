@@ -4,7 +4,6 @@ import streamlit as st
 import requests
 import os
 from dotenv import load_dotenv
-from datetime import datetime
 
 load_dotenv()
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080/api/v1")

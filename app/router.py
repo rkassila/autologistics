@@ -39,7 +39,7 @@ async def extract_document(file: UploadFile = File(...)) -> DocumentExtractRespo
         try:
             storage_url = storage.upload_pdf(pdf_content, file.filename, document_hash)
         except:
-            pass  # Storage optional for PoC
+            pass  # Storage is optional for PoC
 
     # Process
     extracted_text, structured_fields, additional_data, is_valid, validation_message = process_document(

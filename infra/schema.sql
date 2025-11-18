@@ -28,10 +28,3 @@ CREATE TABLE IF NOT EXISTS logistics_documents (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Indexes for faster lookups
-CREATE INDEX IF NOT EXISTS idx_document_hash ON logistics_documents(document_hash);
-CREATE INDEX IF NOT EXISTS idx_filename ON logistics_documents(filename);
-CREATE INDEX IF NOT EXISTS idx_tracking_number ON logistics_documents(tracking_number);
-CREATE INDEX IF NOT EXISTS idx_shipment_date ON logistics_documents(shipment_date);
-CREATE INDEX IF NOT EXISTS idx_carrier ON logistics_documents(carrier);
