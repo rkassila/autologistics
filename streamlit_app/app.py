@@ -66,18 +66,28 @@ if uploaded_file and st.session_state.extracted_data is None:
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
                 response = requests.post(f"{API_BASE_URL}/extract", files=files, timeout=90)
 
+                # Check status code first
                 if response.status_code == 200:
-                    st.session_state.extracted_data = response.json()
-                    st.session_state.document_hash = st.session_state.extracted_data.get("document_hash")
+                    response_data = response.json()
+                    st.session_state.extracted_data = response_data
+                    st.session_state.document_hash = response_data.get("document_hash")
                     st.session_state.filename = uploaded_file.name
                     st.experimental_rerun()
                 else:
+                    # Parse error response
                     try:
-                        st.error(response.json().get("detail", "Error"))
+                        error_data = response.json()
+                        error_detail = error_data.get("detail", "")
                     except:
-                        st.error(f"Error: {response.text or 'Unknown error'}")
+                        error_detail = response.text or "Error"
+
+                    # Check for "already exists" in error message
+                    if "already exists" in error_detail.lower():
+                        st.error("❌ Document already exists in database")
+                    else:
+                        st.error(f"❌ {error_detail}")
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"❌ Error: {str(e)}")
 
 # Review and save
 if st.session_state.extracted_data:
