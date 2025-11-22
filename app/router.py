@@ -333,6 +333,17 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
                 ]
             }
     except Exception as e:
+        error_str = str(e)
+        # Check if table doesn't exist
+        if "does not exist" in error_str.lower() or "undefinedtable" in error_str.lower():
+            return {
+                "total": 0,
+                "count": 0,
+                "offset": offset,
+                "logs": [],
+                "message": "Model log table does not exist yet. Please create it using infra/model_log.sql"
+            }
+        # Other errors still raise exception
         raise HTTPException(status_code=500, detail=f"Error fetching model logs: {str(e)}")
 
 
@@ -361,6 +372,11 @@ async def get_model_log(log_id: int) -> Dict:
     except HTTPException:
         raise
     except Exception as e:
+        error_str = str(e)
+        # Check if table doesn't exist
+        if "does not exist" in error_str.lower() or "undefinedtable" in error_str.lower():
+            raise HTTPException(status_code=404, detail="Model log table does not exist yet. Please create it using infra/model_log.sql")
+        # Other errors still raise exception
         raise HTTPException(status_code=500, detail=f"Error fetching model log: {str(e)}")
 
 
