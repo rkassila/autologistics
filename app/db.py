@@ -171,47 +171,11 @@ def compute_document_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-class ModelLogDatabase:
-    """Database connection manager for model log database."""
-
-    def __init__(self):
-        db_host = os.getenv("MODEL_LOG_DB_HOST", os.getenv("DB_HOST", "localhost"))
-        db_port = os.getenv("MODEL_LOG_DB_PORT", os.getenv("DB_PORT", "5432"))
-        db_user = os.getenv("MODEL_LOG_DB_USER", os.getenv("DB_USER", "postgres"))
-        db_password = os.getenv("MODEL_LOG_DB_PASSWORD", os.getenv("DB_PASSWORD", ""))
-        db_name = os.getenv("MODEL_LOG_DB", "logistics_db")
-
-        if os.getenv("INSTANCE_CONNECTION_NAME"):
-            db_url = f"postgresql+psycopg2://{db_user}:{db_password}@/{db_name}?host=/cloudsql/{os.getenv('INSTANCE_CONNECTION_NAME')}"
-        else:
-            db_url = f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-        self.engine = create_engine(db_url, pool_pre_ping=True)
-        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-
-    def check_connection(self) -> bool:
-        """Check if database connection is working."""
-        try:
-            from sqlalchemy import text
-            with self.engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            return True
-        except Exception:
-            return False
-
-    @contextmanager
-    def get_session(self):
-        """Get database session with context manager."""
-        session = self.SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
+# ModelLog uses the same database connection as LogisticsDocument
+# Both tables are in the same database (logistics_db)
+# Only the table name differs: DB_MODEL_NAME vs DB_TABLE_NAME
 
 db = Database()
-model_log_db = ModelLogDatabase()
+# Reuse the same database connection for model_log
+# Since both tables are in the same database, use the same db instance
+model_log_db = db
