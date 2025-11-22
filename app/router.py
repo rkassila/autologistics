@@ -93,7 +93,11 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             additional_data=data.get("additional_data")
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error saving document: {str(e)}")
+        import traceback
+        error_detail = f"Error saving document: {str(e)}"
+        print(f"Database save error: {error_detail}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_detail)
 
     # Clean up temporary storage
     try:
@@ -103,31 +107,46 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
 
     # Ensure structured_fields is serializable (convert dates to strings)
     serializable_fields = {}
-    for key, value in fields.items():
-        if value is None:
-            serializable_fields[key] = None
-        elif hasattr(value, 'isoformat'):  # Date/datetime objects
-            serializable_fields[key] = value.isoformat()
-        elif isinstance(value, (dict, list)):
-            # Ensure nested objects are JSON serializable
-            serializable_fields[key] = value
-        else:
-            serializable_fields[key] = str(value) if value else None
-
-    # Return response with proper serialization
     try:
+        for key, value in fields.items():
+            if value is None:
+                serializable_fields[key] = None
+            elif hasattr(value, 'isoformat'):  # Date/datetime objects
+                serializable_fields[key] = value.isoformat()
+            elif isinstance(value, (dict, list)):
+                # Ensure nested objects are JSON serializable
+                serializable_fields[key] = value
+            else:
+                serializable_fields[key] = str(value) if value else None
+    except Exception as e:
+        print(f"Warning: Failed to serialize structured_fields: {str(e)}")
+        serializable_fields = None
+
+    # Return response - always return success if document was saved
+    try:
+        # Ensure document_id is available
+        document_id = document.id if hasattr(document, 'id') and document.id else None
         response = DocumentUploadResponse(
             message="Saved",
-            document_id=document.id,
+            document_id=document_id,
             is_duplicate=False,
             structured_fields=serializable_fields
         )
         return response
     except Exception as e:
         # If response serialization fails, still return success but without structured_fields
+        import traceback
+        print(f"Response serialization error: {str(e)}")
+        print(traceback.format_exc())
+        # Get document_id safely
+        document_id = None
+        try:
+            document_id = document.id if hasattr(document, 'id') else None
+        except:
+            pass
         return DocumentUploadResponse(
             message="Saved",
-            document_id=document.id,
+            document_id=document_id,
             is_duplicate=False,
             structured_fields=None
         )
