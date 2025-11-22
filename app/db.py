@@ -52,7 +52,7 @@ class LogisticsDocument(Base):
 
 class ModelLog(Base):
     """SQLAlchemy model for model quality logging."""
-    __tablename__ = os.getenv("DB_MODEL_NAME", "model_log")
+    __tablename__ = os.getenv("MODEL_LOG_TABLE", "model_log")
 
     id = Column(Integer, primary_key=True, index=True)
     success = Column(Boolean, nullable=False)
@@ -188,6 +188,16 @@ class ModelLogDatabase:
 
         self.engine = create_engine(db_url, pool_pre_ping=True)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+
+    def check_connection(self) -> bool:
+        """Check if database connection is working."""
+        try:
+            from sqlalchemy import text
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True
+        except Exception:
+            return False
 
     @contextmanager
     def get_session(self):

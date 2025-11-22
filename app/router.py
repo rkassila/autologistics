@@ -253,7 +253,95 @@ async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogRes
         raise HTTPException(status_code=500, detail=error_detail)
 
 
+@router.get("/model-logs", response_model=Dict)
+async def list_model_logs(limit: int = 100, offset: int = 0):
+    """List all model logs in database."""
+    try:
+        with model_log_db.get_session() as session:
+            logs = session.query(ModelLog).order_by(
+                ModelLog.created_at.desc()
+            ).offset(offset).limit(limit).all()
+
+            total = session.query(ModelLog).count()
+
+            return {
+                "total": total,
+                "count": len(logs),
+                "offset": offset,
+                "logs": [
+                    {
+                        "id": log.id,
+                        "success": log.success,
+                        "document_id": log.document_id,
+                        "document_hash": log.document_hash,
+                        "document_link": log.document_link,
+                        "corrections_made": log.corrections_made,
+                        "failure_reason": log.failure_reason,
+                        "created_at": str(log.created_at)
+                    }
+                    for log in logs
+                ]
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching model logs: {str(e)}")
+
+
+@router.get("/model-logs/{log_id}", response_model=Dict)
+async def get_model_log(log_id: int) -> Dict:
+    """Retrieve a model log by ID."""
+    try:
+        with model_log_db.get_session() as session:
+            log = session.query(ModelLog).filter(ModelLog.id == log_id).first()
+            if not log:
+                raise HTTPException(status_code=404, detail="Model log not found")
+
+            return {
+                "id": log.id,
+                "success": log.success,
+                "document_id": log.document_id,
+                "document_hash": log.document_hash,
+                "document_link": log.document_link,
+                "extraction_result": log.extraction_result,
+                "original_values": log.original_values,
+                "corrected_values": log.corrected_values,
+                "corrections_made": log.corrections_made,
+                "failure_reason": log.failure_reason,
+                "created_at": str(log.created_at)
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching model log: {str(e)}")
+
+
 @router.get("/health")
 async def health_check() -> Dict[str, str]:
     """Health check."""
-    return {"status": "ok", "database": "connected" if db.check_connection() else "disconnected"}
+    # Check main database
+    db_status = "connected" if db.check_connection() else "disconnected"
+
+    # Check model log database
+    model_log_db_status = "unknown"
+    try:
+        model_log_db_status = "connected" if model_log_db.check_connection() else "disconnected"
+    except:
+        model_log_db_status = "disconnected"
+
+    # Check storage bucket
+    bucket_status = "unknown"
+    try:
+        storage = get_storage()
+        if storage:
+            # Try to check if bucket is accessible
+            bucket_status = "connected"
+        else:
+            bucket_status = "not_configured"
+    except:
+        bucket_status = "disconnected"
+
+    return {
+        "status": "ok",
+        "database": db_status,
+        "model_log_db": model_log_db_status,
+        "bucket": bucket_status
+    }
