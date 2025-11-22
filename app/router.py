@@ -2,9 +2,12 @@
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Body
 from typing import Dict
-from app.schemas import DocumentExtractResponse, DocumentSaveRequest, DocumentUploadResponse
+from app.schemas import (
+    DocumentExtractResponse, DocumentSaveRequest, DocumentUploadResponse,
+    ModelLogRequest, ModelLogResponse
+)
 from app.processor import process_document
-from app.db import db, compute_document_hash
+from app.db import db, compute_document_hash, ModelLog, model_log_db
 from app.storage import get_storage
 
 router = APIRouter()
@@ -130,7 +133,8 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             message="Saved",
             document_id=document_id,
             is_duplicate=False,
-            structured_fields=serializable_fields
+            structured_fields=serializable_fields,
+            storage_url=data["storage_url"]
         )
         return response
     except Exception as e:
@@ -148,7 +152,8 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             message="Saved",
             document_id=document_id,
             is_duplicate=False,
-            structured_fields=None
+            structured_fields=None,
+            storage_url=data.get("storage_url")
         )
 
 
@@ -214,6 +219,38 @@ async def get_document(document_id: int) -> Dict:
             "created_at": str(document.created_at),
             "additional_data": document.additional_data
         }
+
+
+@router.post("/model-log", response_model=ModelLogResponse)
+async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogResponse:
+    """Log model quality data (success/failure with corrections)."""
+    try:
+        with model_log_db.get_session() as session:
+            log_entry = ModelLog(
+                success=request.success,
+                document_id=request.document_id,
+                document_hash=request.document_hash,
+                document_link=request.document_link,
+                extraction_result=request.extraction_result,
+                original_values=request.original_values,
+                corrected_values=request.corrected_values,
+                corrections_made=request.corrections_made,
+                failure_reason=request.failure_reason
+            )
+            session.add(log_entry)
+            session.commit()
+            session.refresh(log_entry)
+
+            return ModelLogResponse(
+                message="Model log saved",
+                log_id=log_entry.id
+            )
+    except Exception as e:
+        import traceback
+        error_detail = f"Error saving model log: {str(e)}"
+        print(f"Model log error: {error_detail}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @router.get("/health")
