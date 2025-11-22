@@ -52,7 +52,7 @@ class LogisticsDocument(Base):
 
 class ModelLog(Base):
     """SQLAlchemy model for model quality logging."""
-    __tablename__ = os.getenv("MODEL_LOG_TABLE", "model_log")
+    __tablename__ = os.getenv("DB_MODEL_NAME", "model_log")
 
     id = Column(Integer, primary_key=True, index=True)
     success = Column(Boolean, nullable=False)

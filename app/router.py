@@ -221,6 +221,30 @@ async def get_document(document_id: int) -> Dict:
         }
 
 
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: int) -> Dict[str, str]:
+    """Delete a document by ID."""
+    try:
+        with db.get_session() as session:
+            from app.db import LogisticsDocument
+            document = session.query(LogisticsDocument).filter(LogisticsDocument.id == document_id).first()
+            if not document:
+                raise HTTPException(status_code=404, detail="Document not found")
+
+            session.delete(document)
+            session.commit()
+
+            return {"message": f"Document {document_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"Error deleting document: {str(e)}"
+        print(f"Delete error: {error_detail}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
 @router.post("/model-log", response_model=ModelLogResponse)
 async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogResponse:
     """Log model quality data (success/failure with corrections)."""
