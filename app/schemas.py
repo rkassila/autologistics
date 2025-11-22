@@ -13,6 +13,7 @@ class DocumentExtractResponse(BaseModel):
     extracted_text: Optional[str] = None
     structured_fields: Optional[Dict[str, Any]] = None
     storage_url: Optional[str] = None
+    already_exists: bool = False
 
 
 class DocumentSaveRequest(BaseModel):
