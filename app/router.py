@@ -223,7 +223,7 @@ async def get_document(document_id: int) -> Dict:
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: int) -> Dict[str, str]:
-    """Delete a document by ID."""
+    """Delete a document by ID, including the stored file if it exists."""
     try:
         with db.get_session() as session:
             from app.db import LogisticsDocument
@@ -231,10 +231,36 @@ async def delete_document(document_id: int) -> Dict[str, str]:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
 
+            # Store storage URL before deleting from DB
+            storage_url = document.storage_url
+
+            # Delete from storage first if URL exists
+            storage_deleted = False
+            if storage_url:
+                try:
+                    storage = get_storage()
+                    if storage:
+                        storage_deleted = storage.delete_file(storage_url)
+                        if storage_deleted:
+                            print(f"Deleted file from storage: {storage_url}")
+                        else:
+                            print(f"Warning: File not found in storage or deletion failed: {storage_url}")
+                except Exception as e:
+                    print(f"Warning: Error deleting file from storage: {str(e)}")
+                    # Continue with DB deletion even if storage deletion fails
+
+            # Delete from database
             session.delete(document)
             session.commit()
 
-            return {"message": f"Document {document_id} deleted successfully"}
+            message = f"Document {document_id} deleted successfully"
+            if storage_url:
+                if storage_deleted:
+                    message += " (file deleted from storage)"
+                else:
+                    message += " (storage file deletion attempted)"
+
+            return {"message": message}
     except HTTPException:
         raise
     except Exception as e:
