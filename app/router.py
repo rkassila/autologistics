@@ -135,38 +135,67 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_detail)
 
-    # Automatically create model_log entry - USING TEST DATA (like test page)
-    # Use hardcoded test data to verify the database write works
+    # Automatically create model_log entry - DIRECT database write (no helper function)
+    # Write directly to database using the same pattern as /model-log endpoint
     try:
         from datetime import datetime
-        log_entry = create_model_log_entry(
-            success=True,  # Test with success=True
-            document_id=document.id,
-            document_hash=request.document_hash,
-            document_link=data.get("storage_url") or "https://example.com/test.pdf",
-            extraction_result={
-                "model": "gpt-4o-mini",
-                "timestamp": datetime.now().isoformat(),
-                "raw_response": "Test extraction result from save endpoint"
-            },
-            original_values={
-                "tracking_number": "TEST123",
-                "shipper_name": "Test Shipper",
-                "receiver_name": "Test Receiver"
-            },
-            corrected_values={
-                "tracking_number": "TEST123",
-                "shipper_name": "Test Shipper",
-                "receiver_name": "Test Receiver"
-            },
-            corrections_made=None,
-            failure_reason=None
-        )
+        import traceback
+
+        # Create a NEW session explicitly (don't reuse any existing session)
+        session = model_log_db.SessionLocal()
+        try:
+            # Create the log entry object
+            log_entry = ModelLog(
+                success=True,  # Test with success=True
+                document_id=document.id,
+                document_hash=request.document_hash,
+                document_link=data.get("storage_url") or "https://example.com/test.pdf",
+                extraction_result={
+                    "model": "gpt-4o-mini",
+                    "timestamp": datetime.now().isoformat(),
+                    "raw_response": "Test extraction result from save endpoint"
+                },
+                original_values={
+                    "tracking_number": "TEST123",
+                    "shipper_name": "Test Shipper",
+                    "receiver_name": "Test Receiver"
+                },
+                corrected_values={
+                    "tracking_number": "TEST123",
+                    "shipper_name": "Test Shipper",
+                    "receiver_name": "Test Receiver"
+                },
+                corrections_made=None,
+                failure_reason=None
+            )
+
+            # Add to session
+            session.add(log_entry)
+
+            # Flush to get the ID (but don't commit yet)
+            session.flush()
+
+            # Explicit commit
+            session.commit()
+
+            # Refresh to get all fields
+            session.refresh(log_entry)
+
+            print(f"✅ Model log entry created successfully: ID={log_entry.id}, document_id={document.id}")
+
+        except Exception as db_error:
+            # Rollback on error
+            session.rollback()
+            raise db_error
+        finally:
+            # Always close the session
+            session.close()
+
     except Exception as e:
         # Log error but don't fail document save
         import traceback
         error_detail = f"Error saving model log: {str(e)}"
-        print(f"Model log error in save endpoint: {error_detail}")
+        print(f"❌ Model log error in save endpoint: {error_detail}")
         print(traceback.format_exc())
         # Continue - document save was successful
 
