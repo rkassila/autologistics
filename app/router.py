@@ -104,7 +104,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_detail)
 
-    # Automatically create model_log entry
+    # Automatically create model_log entry (using same logic as /model-log endpoint)
     try:
         original_fields = data.get("structured_fields", {})
         corrected_fields = fields
@@ -156,7 +156,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
         corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
 
-        # Create model log entry
+        # Create model log entry using the same pattern as /model-log endpoint
         with model_log_db.get_session() as session:
             log_entry = ModelLog(
                 success=success,
@@ -170,7 +170,8 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
                 failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
             )
             session.add(log_entry)
-            # Context manager will auto-commit on successful exit
+            session.commit()
+            session.refresh(log_entry)
     except Exception:
         # Silently continue - document save was successful even if model log fails
         pass
