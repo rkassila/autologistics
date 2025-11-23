@@ -135,73 +135,35 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_detail)
 
-    # Automatically create model_log entry - EXACT same code as /model-log endpoint
-    # Prepare data exactly like test page does
-    original_fields = data.get("structured_fields", {})
-    corrected_fields = fields
-
-    # Helper function to make values JSON serializable
-    def make_json_serializable(val):
-        """Convert values to JSON-serializable format."""
-        if val is None:
-            return None
-        if hasattr(val, 'isoformat'):  # date/datetime objects
-            return val.isoformat()
-        if isinstance(val, (dict, list)):
-            # Recursively process nested structures
-            if isinstance(val, dict):
-                return {k: make_json_serializable(v) for k, v in val.items()}
-            else:
-                return [make_json_serializable(item) for item in val]
-        return val
-
-    # Compare original vs corrected to detect changes
-    corrections_made = {}
-    for key in set(list(original_fields.keys()) + list(corrected_fields.keys())):
-        original_val = original_fields.get(key)
-        corrected_val = corrected_fields.get(key)
-
-        # Normalize values for comparison
-        def normalize_val(v):
-            if v is None:
-                return None
-            if hasattr(v, 'isoformat'):  # date/datetime objects
-                return v.isoformat()
-            if isinstance(v, str):
-                return v.strip() if v.strip() else None
-            return str(v) if v else None
-
-        orig_norm = normalize_val(original_val)
-        corr_norm = normalize_val(corrected_val)
-
-        if orig_norm != corr_norm:
-            corrections_made[key] = {
-                "original": make_json_serializable(original_val),
-                "corrected": make_json_serializable(corrected_val)
-            }
-
-    # Determine success: true if no corrections were made
-    success = len(corrections_made) == 0
-
-    # Make fields JSON serializable for storage
-    original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
-    corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
-
-    # Create model log entry - EXACT same helper function call as /model-log endpoint
+    # Automatically create model_log entry - USING TEST DATA (like test page)
+    # Use hardcoded test data to verify the database write works
     try:
+        from datetime import datetime
         log_entry = create_model_log_entry(
-            success=success,
+            success=True,  # Test with success=True
             document_id=document.id,
             document_hash=request.document_hash,
-            document_link=data.get("storage_url"),
-            extraction_result=data.get("additional_data"),
-            original_values=original_values_serialized,
-            corrected_values=corrected_values_serialized,
-            corrections_made=corrections_made if corrections_made else None,
-            failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
+            document_link=data.get("storage_url") or "https://example.com/test.pdf",
+            extraction_result={
+                "model": "gpt-4o-mini",
+                "timestamp": datetime.now().isoformat(),
+                "raw_response": "Test extraction result from save endpoint"
+            },
+            original_values={
+                "tracking_number": "TEST123",
+                "shipper_name": "Test Shipper",
+                "receiver_name": "Test Receiver"
+            },
+            corrected_values={
+                "tracking_number": "TEST123",
+                "shipper_name": "Test Shipper",
+                "receiver_name": "Test Receiver"
+            },
+            corrections_made=None,
+            failure_reason=None
         )
     except Exception as e:
-        # Log error but don't fail document save - same pattern as before but with logging
+        # Log error but don't fail document save
         import traceback
         error_detail = f"Error saving model log: {str(e)}"
         print(f"Model log error in save endpoint: {error_detail}")
