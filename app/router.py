@@ -176,6 +176,9 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             session.rollback()
         finally:
             session.close()
+    except Exception:
+        # Silently continue - document save was successful even if model log fails
+        pass
 
     # Clean up temporary storage
     try:
