@@ -157,7 +157,8 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
 
         # Create model log entry
-        with model_log_db.get_session() as session:
+        session = model_log_db.SessionLocal()
+        try:
             log_entry = ModelLog(
                 success=success,
                 document_id=document.id,
@@ -171,13 +172,10 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             )
             session.add(log_entry)
             session.commit()
-            print(f"Model log created for document {document.id}: success={success}, corrections={len(corrections_made)}")
-    except Exception as e:
-        # Don't fail the save if model log creation fails, but log the error
-        import traceback
-        print(f"Warning: Failed to create model log entry: {str(e)}")
-        print(traceback.format_exc())
-        # Continue - document save was successful
+        except Exception:
+            session.rollback()
+        finally:
+            session.close()
 
     # Clean up temporary storage
     try:
