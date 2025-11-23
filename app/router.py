@@ -407,6 +407,7 @@ async def test_model_log_save(request: Dict = Body(...)):
 
         # Get data from request
         document_hash = request.get("document_hash")
+        document_id = request.get("document_id")  # Get document_id from request if provided
         original_fields = request.get("original_fields", {})
         reviewed_fields = request.get("reviewed_fields", {})
         additional_data = request.get("additional_data", {})
@@ -415,14 +416,14 @@ async def test_model_log_save(request: Dict = Body(...)):
         if not document_hash:
             raise HTTPException(status_code=400, detail="document_hash is required")
 
-        # Try to find document by hash to get document_id
-        document_id = None
-        try:
-            existing_doc = db.get_document_by_hash(document_hash)
-            if existing_doc:
-                document_id = existing_doc.id
-        except Exception:
-            pass  # Document might not be saved yet, that's okay
+        # If document_id not provided, try to find document by hash
+        if document_id is None:
+            try:
+                existing_doc = db.get_document_by_hash(document_hash)
+                if existing_doc:
+                    document_id = existing_doc.id
+            except Exception:
+                pass  # Document might not be saved yet, that's okay
 
         # Helper function to make values JSON serializable
         def make_json_serializable(val):
@@ -444,20 +445,24 @@ async def test_model_log_save(request: Dict = Body(...)):
             original_val = original_fields.get(key)
             reviewed_val = reviewed_fields.get(key)
 
-            # Normalize values for comparison
+            # Normalize values for comparison - treat empty strings and None as equivalent
             def normalize_val(v):
                 if v is None:
                     return None
+                if isinstance(v, str):
+                    stripped = v.strip()
+                    # Treat empty strings as None
+                    return stripped if stripped else None
                 if hasattr(v, 'isoformat'):  # date/datetime objects
                     return v.isoformat()
-                if isinstance(v, str):
-                    return v.strip() if v.strip() else None
+                # For other types, convert to string but None if falsy
                 return str(v) if v else None
 
             orig_norm = normalize_val(original_val)
             rev_norm = normalize_val(reviewed_val)
 
-            if orig_norm != rev_norm:
+            # Only record correction if values are actually different (both not None/empty)
+            if orig_norm != rev_norm and (orig_norm is not None or rev_norm is not None):
                 corrections_made[key] = {
                     "original": make_json_serializable(original_val),
                     "corrected": make_json_serializable(reviewed_val)
