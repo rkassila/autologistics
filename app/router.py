@@ -399,50 +399,90 @@ async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogRes
 
 
 @router.post("/test-model-log-save")
-async def test_model_log_save():
-    """Test endpoint that writes directly to model_log - same pattern as test page."""
+async def test_model_log_save(request: Dict = Body(...)):
+    """Save to model_log using real document data."""
     try:
         from datetime import datetime
         import traceback
 
-        # Use test data exactly like test page
-        test_data = {
-            "success": True,
-            "document_id": 1,
-            "document_hash": "test_hash_from_save_endpoint",
-            "document_link": "https://example.com/test.pdf",
-            "extraction_result": {
-                "model": "gpt-4o-mini",
-                "timestamp": datetime.now().isoformat(),
-                "raw_response": "Test extraction result from save endpoint"
-            },
-            "original_values": {
-                "tracking_number": "TEST123",
-                "shipper_name": "Test Shipper",
-                "receiver_name": "Test Receiver"
-            },
-            "corrected_values": {
-                "tracking_number": "TEST123",
-                "shipper_name": "Test Shipper",
-                "receiver_name": "Test Receiver"
-            },
-            "corrections_made": None,
-            "failure_reason": None
-        }
+        # Get data from request
+        document_hash = request.get("document_hash")
+        original_fields = request.get("original_fields", {})
+        reviewed_fields = request.get("reviewed_fields", {})
+        additional_data = request.get("additional_data", {})
+        storage_url = request.get("storage_url")
+
+        if not document_hash:
+            raise HTTPException(status_code=400, detail="document_hash is required")
+
+        # Try to find document by hash to get document_id
+        document_id = None
+        try:
+            existing_doc = db.get_document_by_hash(document_hash)
+            if existing_doc:
+                document_id = existing_doc.id
+        except Exception:
+            pass  # Document might not be saved yet, that's okay
+
+        # Helper function to make values JSON serializable
+        def make_json_serializable(val):
+            """Convert values to JSON-serializable format."""
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):  # date/datetime objects
+                return val.isoformat()
+            if isinstance(val, (dict, list)):
+                if isinstance(val, dict):
+                    return {k: make_json_serializable(v) for k, v in val.items()}
+                else:
+                    return [make_json_serializable(item) for item in val]
+            return val
+
+        # Compare original vs reviewed to detect changes
+        corrections_made = {}
+        for key in set(list(original_fields.keys()) + list(reviewed_fields.keys())):
+            original_val = original_fields.get(key)
+            reviewed_val = reviewed_fields.get(key)
+
+            # Normalize values for comparison
+            def normalize_val(v):
+                if v is None:
+                    return None
+                if hasattr(v, 'isoformat'):  # date/datetime objects
+                    return v.isoformat()
+                if isinstance(v, str):
+                    return v.strip() if v.strip() else None
+                return str(v) if v else None
+
+            orig_norm = normalize_val(original_val)
+            rev_norm = normalize_val(reviewed_val)
+
+            if orig_norm != rev_norm:
+                corrections_made[key] = {
+                    "original": make_json_serializable(original_val),
+                    "corrected": make_json_serializable(reviewed_val)
+                }
+
+        # Determine success: true if no corrections were made
+        success = len(corrections_made) == 0
+
+        # Make fields JSON serializable for storage
+        original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
+        reviewed_values_serialized = {k: make_json_serializable(v) for k, v in reviewed_fields.items()}
 
         # Write directly to database - EXACT same code as save endpoint
         session = model_log_db.SessionLocal()
         try:
             log_entry = ModelLog(
-                success=test_data["success"],
-                document_id=test_data["document_id"],
-                document_hash=test_data["document_hash"],
-                document_link=test_data["document_link"],
-                extraction_result=test_data["extraction_result"],
-                original_values=test_data["original_values"],
-                corrected_values=test_data["corrected_values"],
-                corrections_made=test_data["corrections_made"],
-                failure_reason=test_data["failure_reason"]
+                success=success,
+                document_id=document_id,
+                document_hash=document_hash,
+                document_link=storage_url,
+                extraction_result=additional_data,
+                original_values=original_values_serialized,
+                corrected_values=reviewed_values_serialized,
+                corrections_made=corrections_made if corrections_made else None,
+                failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
             )
 
             session.add(log_entry)
@@ -450,11 +490,11 @@ async def test_model_log_save():
             session.commit()
             session.refresh(log_entry)
 
-            print(f"✅ Test model log entry created successfully: ID={log_entry.id}")
+            print(f"✅ Model log entry created successfully: ID={log_entry.id}, document_id={document_id}, document_hash={document_hash}")
 
             return {
                 "success": True,
-                "message": "Test model log saved successfully",
+                "message": "Model log saved successfully",
                 "log_id": log_entry.id,
                 "document_id": log_entry.document_id,
                 "document_hash": log_entry.document_hash
@@ -466,10 +506,12 @@ async def test_model_log_save():
         finally:
             session.close()
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
-        error_detail = f"Error in test model log save: {str(e)}"
-        print(f"❌ Test model log error: {error_detail}")
+        error_detail = f"Error in model log save: {str(e)}"
+        print(f"❌ Model log error: {error_detail}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_detail)
 
