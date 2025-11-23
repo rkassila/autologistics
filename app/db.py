@@ -4,7 +4,7 @@ import os
 import hashlib
 from typing import Optional, Dict, Any
 from datetime import date, datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Date, JSON, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Date, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
@@ -48,26 +48,6 @@ class LogisticsDocument(Base):
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class ModelLog(Base):
-    """SQLAlchemy model for model quality logging."""
-    __tablename__ = os.getenv("DB_MODEL_NAME", "model_log")
-
-    id = Column(Integer, primary_key=True, index=True)
-    success = Column(Boolean, nullable=False)
-    # Foreign key references main table (name from DB_TABLE_NAME env var)
-    # Note: Foreign key constraint should be added manually in database if needed
-    main_table_name = os.getenv("DB_TABLE_NAME", "logistics_documents")
-    document_id = Column(Integer, nullable=True)
-    document_hash = Column(String(64), nullable=False, index=True)
-    document_link = Column(String(500))
-    extraction_result = Column(JSON)
-    original_values = Column(JSON)
-    corrected_values = Column(JSON)
-    corrections_made = Column(JSON)
-    failure_reason = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
 
 
 class Database:
@@ -171,11 +151,5 @@ def compute_document_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-# ModelLog uses the same database connection as LogisticsDocument
-# Both tables are in the same database (logistics_db)
-# Only the table name differs: DB_MODEL_NAME vs DB_TABLE_NAME
-
+# Create database instance
 db = Database()
-# Reuse the same database connection for model_log
-# Since both tables are in the same database, use the same db instance
-model_log_db = db

@@ -7,7 +7,8 @@ from app.schemas import (
     ModelLogRequest, ModelLogResponse
 )
 from app.processor import process_document
-from app.db import db, compute_document_hash, ModelLog, model_log_db
+from app.db import db, compute_document_hash
+from app.model_db import ModelLog, model_log_db
 from app.storage import get_storage
 
 router = APIRouter()
@@ -101,6 +102,81 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         print(f"Database save error: {error_detail}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_detail)
+
+    # Automatically create model_log entry
+    try:
+        original_fields = data.get("structured_fields", {})
+        corrected_fields = fields
+
+        # Helper function to make values JSON serializable
+        def make_json_serializable(val):
+            """Convert values to JSON-serializable format."""
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):  # date/datetime objects
+                return val.isoformat()
+            if isinstance(val, (dict, list)):
+                # Recursively process nested structures
+                if isinstance(val, dict):
+                    return {k: make_json_serializable(v) for k, v in val.items()}
+                else:
+                    return [make_json_serializable(item) for item in val]
+            return val
+
+        # Compare original vs corrected to detect changes
+        corrections_made = {}
+        for key in set(list(original_fields.keys()) + list(corrected_fields.keys())):
+            original_val = original_fields.get(key)
+            corrected_val = corrected_fields.get(key)
+
+            # Normalize values for comparison
+            def normalize_val(v):
+                if v is None:
+                    return None
+                if hasattr(v, 'isoformat'):  # date/datetime objects
+                    return v.isoformat()
+                if isinstance(v, str):
+                    return v.strip() if v.strip() else None
+                return str(v) if v else None
+
+            orig_norm = normalize_val(original_val)
+            corr_norm = normalize_val(corrected_val)
+
+            if orig_norm != corr_norm:
+                corrections_made[key] = {
+                    "original": make_json_serializable(original_val),
+                    "corrected": make_json_serializable(corrected_val)
+                }
+
+        # Determine success: true if no corrections were made
+        success = len(corrections_made) == 0
+
+        # Make fields JSON serializable for storage
+        original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
+        corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
+
+        # Create model log entry
+        with model_log_db.get_session() as session:
+            log_entry = ModelLog(
+                success=success,
+                document_id=document.id,
+                document_hash=request.document_hash,
+                document_link=data.get("storage_url"),
+                extraction_result=data.get("additional_data"),
+                original_values=original_values_serialized,
+                corrected_values=corrected_values_serialized,
+                corrections_made=corrections_made if corrections_made else None,
+                failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
+            )
+            session.add(log_entry)
+            session.commit()
+            print(f"Model log created for document {document.id}: success={success}, corrections={len(corrections_made)}")
+    except Exception as e:
+        # Don't fail the save if model log creation fails, but log the error
+        import traceback
+        print(f"Warning: Failed to create model log entry: {str(e)}")
+        print(traceback.format_exc())
+        # Continue - document save was successful
 
     # Clean up temporary storage
     try:
