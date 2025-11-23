@@ -28,6 +28,7 @@ def create_model_log_entry(
     failure_reason: str = None
 ) -> ModelLog:
     """Helper function to create a model log entry - same logic as /model-log endpoint."""
+    # Use the exact same pattern as /model-log endpoint
     with model_log_db.get_session() as session:
         log_entry = ModelLog(
             success=success,
@@ -187,6 +188,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
 
         # Create model log entry using the same helper function as /model-log endpoint
+        # This uses the exact same code path as the test page
         create_model_log_entry(
             success=success,
             document_id=document.id,
@@ -198,8 +200,12 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             corrections_made=corrections_made if corrections_made else None,
             failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
         )
-    except Exception:
-        # Silently continue - document save was successful even if model log fails
+    except Exception as e:
+        # Log error but don't fail document save
+        import traceback
+        print(f"Model log creation failed in save endpoint: {str(e)}")
+        print(traceback.format_exc())
+        # Continue - document save was successful
         pass
 
     # Clean up temporary storage
