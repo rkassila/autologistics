@@ -1,5 +1,6 @@
 """FastAPI routes for document processing."""
 
+import os
 from fastapi import APIRouter, UploadFile, File, HTTPException, Body
 from typing import Dict
 from app.schemas import (
@@ -383,6 +384,22 @@ async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogRes
 async def list_model_logs(limit: int = 100, offset: int = 0):
     """List all model logs in database."""
     try:
+        # First check if table exists using metadata inspection
+        from sqlalchemy import inspect
+        inspector = inspect(model_log_db.engine)
+        table_name = os.getenv("DB_MODEL_NAME", "model_log")
+        table_exists = table_name in inspector.get_table_names()
+
+        if not table_exists:
+            return {
+                "total": 0,
+                "count": 0,
+                "offset": offset,
+                "logs": [],
+                "message": "Model log table does not exist yet. Please create it using infra/model_log.sql"
+            }
+
+        # Table exists - proceed with query
         with model_log_db.get_session() as session:
             logs = session.query(ModelLog).order_by(
                 ModelLog.created_at.desc()
@@ -390,6 +407,7 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
 
             total = session.query(ModelLog).count()
 
+            # Return results (even if empty - table exists but has no rows)
             return {
                 "total": total,
                 "count": len(logs),
@@ -408,9 +426,11 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
                     for log in logs
                 ]
             }
+    except HTTPException:
+        raise
     except Exception as e:
+        # If metadata inspection fails, fall back to exception-based detection
         error_str = str(e)
-        # Check if table doesn't exist
         if "does not exist" in error_str.lower() or "undefinedtable" in error_str.lower():
             return {
                 "total": 0,
@@ -419,7 +439,10 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
                 "logs": [],
                 "message": "Model log table does not exist yet. Please create it using infra/model_log.sql"
             }
-        # Other errors still raise exception
+        # Log the actual error for debugging
+        import traceback
+        print(f"Unexpected error in list_model_logs: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error fetching model logs: {str(e)}")
 
 
