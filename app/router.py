@@ -157,8 +157,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
 
         # Create model log entry
-        session = model_log_db.SessionLocal()
-        try:
+        with model_log_db.get_session() as session:
             log_entry = ModelLog(
                 success=success,
                 document_id=document.id,
@@ -171,11 +170,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
                 failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
             )
             session.add(log_entry)
-            session.commit()
-        except Exception:
-            session.rollback()
-        finally:
-            session.close()
+            # Context manager will auto-commit on successful exit
     except Exception:
         # Silently continue - document save was successful even if model log fails
         pass
