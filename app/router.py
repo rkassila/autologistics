@@ -396,6 +396,82 @@ async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogRes
         raise HTTPException(status_code=500, detail=error_detail)
 
 
+@router.post("/test-model-log-save")
+async def test_model_log_save():
+    """Test endpoint that writes directly to model_log - same pattern as test page."""
+    try:
+        from datetime import datetime
+        import traceback
+
+        # Use test data exactly like test page
+        test_data = {
+            "success": True,
+            "document_id": 1,
+            "document_hash": "test_hash_from_save_endpoint",
+            "document_link": "https://example.com/test.pdf",
+            "extraction_result": {
+                "model": "gpt-4o-mini",
+                "timestamp": datetime.now().isoformat(),
+                "raw_response": "Test extraction result from save endpoint"
+            },
+            "original_values": {
+                "tracking_number": "TEST123",
+                "shipper_name": "Test Shipper",
+                "receiver_name": "Test Receiver"
+            },
+            "corrected_values": {
+                "tracking_number": "TEST123",
+                "shipper_name": "Test Shipper",
+                "receiver_name": "Test Receiver"
+            },
+            "corrections_made": None,
+            "failure_reason": None
+        }
+
+        # Write directly to database - EXACT same code as save endpoint
+        session = model_log_db.SessionLocal()
+        try:
+            log_entry = ModelLog(
+                success=test_data["success"],
+                document_id=test_data["document_id"],
+                document_hash=test_data["document_hash"],
+                document_link=test_data["document_link"],
+                extraction_result=test_data["extraction_result"],
+                original_values=test_data["original_values"],
+                corrected_values=test_data["corrected_values"],
+                corrections_made=test_data["corrections_made"],
+                failure_reason=test_data["failure_reason"]
+            )
+
+            session.add(log_entry)
+            session.flush()
+            session.commit()
+            session.refresh(log_entry)
+
+            print(f"✅ Test model log entry created successfully: ID={log_entry.id}")
+
+            return {
+                "success": True,
+                "message": "Test model log saved successfully",
+                "log_id": log_entry.id,
+                "document_id": log_entry.document_id,
+                "document_hash": log_entry.document_hash
+            }
+
+        except Exception as db_error:
+            session.rollback()
+            raise db_error
+        finally:
+            session.close()
+
+    except Exception as e:
+        import traceback
+        error_detail = f"Error in test model log save: {str(e)}"
+        print(f"❌ Test model log error: {error_detail}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
 @router.get("/model-logs", response_model=Dict)
 async def list_model_logs(limit: int = 100, offset: int = 0):
     """List all model logs in database."""
