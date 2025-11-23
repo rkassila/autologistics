@@ -16,6 +16,36 @@ router = APIRouter()
 _extracted_documents = {}
 
 
+def create_model_log_entry(
+    success: bool,
+    document_id: int,
+    document_hash: str,
+    document_link: str = None,
+    extraction_result: dict = None,
+    original_values: dict = None,
+    corrected_values: dict = None,
+    corrections_made: dict = None,
+    failure_reason: str = None
+) -> ModelLog:
+    """Helper function to create a model log entry - same logic as /model-log endpoint."""
+    with model_log_db.get_session() as session:
+        log_entry = ModelLog(
+            success=success,
+            document_id=document_id,
+            document_hash=document_hash,
+            document_link=document_link,
+            extraction_result=extraction_result,
+            original_values=original_values,
+            corrected_values=corrected_values,
+            corrections_made=corrections_made,
+            failure_reason=failure_reason
+        )
+        session.add(log_entry)
+        session.commit()
+        session.refresh(log_entry)
+        return log_entry
+
+
 @router.post("/extract", response_model=DocumentExtractResponse)
 async def extract_document(file: UploadFile = File(...)) -> DocumentExtractResponse:
     """Extract document without saving."""
@@ -156,22 +186,18 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
         corrected_values_serialized = {k: make_json_serializable(v) for k, v in corrected_fields.items()}
 
-        # Create model log entry using the same pattern as /model-log endpoint
-        with model_log_db.get_session() as session:
-            log_entry = ModelLog(
-                success=success,
-                document_id=document.id,
-                document_hash=request.document_hash,
-                document_link=data.get("storage_url"),
-                extraction_result=data.get("additional_data"),
-                original_values=original_values_serialized,
-                corrected_values=corrected_values_serialized,
-                corrections_made=corrections_made if corrections_made else None,
-                failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
-            )
-            session.add(log_entry)
-            session.commit()
-            session.refresh(log_entry)
+        # Create model log entry using the same helper function as /model-log endpoint
+        create_model_log_entry(
+            success=success,
+            document_id=document.id,
+            document_hash=request.document_hash,
+            document_link=data.get("storage_url"),
+            extraction_result=data.get("additional_data"),
+            original_values=original_values_serialized,
+            corrected_values=corrected_values_serialized,
+            corrections_made=corrections_made if corrections_made else None,
+            failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
+        )
     except Exception:
         # Silently continue - document save was successful even if model log fails
         pass
@@ -349,26 +375,22 @@ async def delete_document(document_id: int) -> Dict[str, str]:
 async def log_model_quality(request: ModelLogRequest = Body(...)) -> ModelLogResponse:
     """Log model quality data (success/failure with corrections)."""
     try:
-        with model_log_db.get_session() as session:
-            log_entry = ModelLog(
-                success=request.success,
-                document_id=request.document_id,
-                document_hash=request.document_hash,
-                document_link=request.document_link,
-                extraction_result=request.extraction_result,
-                original_values=request.original_values,
-                corrected_values=request.corrected_values,
-                corrections_made=request.corrections_made,
-                failure_reason=request.failure_reason
-            )
-            session.add(log_entry)
-            session.commit()
-            session.refresh(log_entry)
+        log_entry = create_model_log_entry(
+            success=request.success,
+            document_id=request.document_id,
+            document_hash=request.document_hash,
+            document_link=request.document_link,
+            extraction_result=request.extraction_result,
+            original_values=request.original_values,
+            corrected_values=request.corrected_values,
+            corrections_made=request.corrections_made,
+            failure_reason=request.failure_reason
+        )
 
-            return ModelLogResponse(
-                message="Model log saved",
-                log_id=log_entry.id
-            )
+        return ModelLogResponse(
+            message="Model log saved",
+            log_id=log_entry.id
+        )
     except Exception as e:
         import traceback
         error_detail = f"Error saving model log: {str(e)}"
