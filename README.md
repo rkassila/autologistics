@@ -2,6 +2,8 @@
 
 FastAPI backend for logistics document processing with PDF extraction, structured field parsing using OpenAI, and model quality tracking.
 
+**Frontend Repository:** [autologistics-front](https://github.com/rkassila/autologistics-front)
+
 ## Features
 
 - PDF text extraction (supports both text-based and scanned PDFs with OCR)
