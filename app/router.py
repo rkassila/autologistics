@@ -440,8 +440,10 @@ async def test_model_log_save(request: Dict = Body(...)):
             return val
 
         # Compare original vs reviewed to detect changes
+        # Only compare fields that exist in reviewed_fields (fields the user could edit)
+        # This prevents false positives for fields like shipping_method that aren't in the form
         corrections_made = {}
-        for key in set(list(original_fields.keys()) + list(reviewed_fields.keys())):
+        for key in reviewed_fields.keys():
             original_val = original_fields.get(key)
             reviewed_val = reviewed_fields.get(key)
 
@@ -461,12 +463,17 @@ async def test_model_log_save(request: Dict = Body(...)):
             orig_norm = normalize_val(original_val)
             rev_norm = normalize_val(reviewed_val)
 
-            # Only record correction if values are actually different (both not None/empty)
-            if orig_norm != rev_norm and (orig_norm is not None or rev_norm is not None):
-                corrections_made[key] = {
-                    "original": make_json_serializable(original_val),
-                    "corrected": make_json_serializable(reviewed_val)
-                }
+            # Only record correction if values are actually different
+            # If both normalize to None/empty, they're the same (no change)
+            # If one is None/empty and the other has a value, that's a change
+            if orig_norm != rev_norm:
+                # Only record if at least one value is not None/empty (actual change)
+                # This ensures we don't record when both are None/empty (which would be equal)
+                if orig_norm is not None or rev_norm is not None:
+                    corrections_made[key] = {
+                        "original": make_json_serializable(original_val),
+                        "corrected": make_json_serializable(reviewed_val)
+                    }
 
         # Determine success: true if no corrections were made
         success = len(corrections_made) == 0
