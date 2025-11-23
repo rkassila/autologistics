@@ -485,12 +485,25 @@ async def health_check() -> Dict[str, str]:
     # Check main database
     db_status = "connected" if db.check_connection() else "disconnected"
 
-    # Check model log database
+    # Check model log database - verify both connection AND table existence
     model_log_db_status = "unknown"
     try:
-        model_log_db_status = "connected" if model_log_db.check_connection() else "disconnected"
-    except:
+        if model_log_db.check_connection():
+            # Connection works, now check if table exists
+            from sqlalchemy import inspect
+            inspector = inspect(model_log_db.engine)
+            table_name = os.getenv("DB_MODEL_NAME", "model_log")
+            table_exists = table_name in inspector.get_table_names()
+
+            if table_exists:
+                model_log_db_status = "connected"
+            else:
+                model_log_db_status = "disconnected"  # Table doesn't exist
+        else:
+            model_log_db_status = "disconnected"
+    except Exception as e:
         model_log_db_status = "disconnected"
+        print(f"Model log DB health check error: {str(e)}")
 
     # Check storage bucket
     bucket_status = "unknown"
