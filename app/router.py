@@ -27,8 +27,7 @@ def create_model_log_entry(
     corrections_made: dict = None,
     failure_reason: str = None
 ) -> ModelLog:
-    """Helper function to create a model log entry - same logic as /model-log endpoint."""
-    # Use the exact same pattern as /model-log endpoint
+    """Creates a model log entry in the database."""
     with model_log_db.get_session() as session:
         log_entry = ModelLog(
             success=success,
@@ -56,29 +55,28 @@ async def extract_document(file: UploadFile = File(...)) -> DocumentExtractRespo
     pdf_content = await file.read()
     document_hash = compute_document_hash(pdf_content)
 
-    # Check database - flag if already saved, but still process
+    # Check if document was already processed
     already_exists = False
     try:
         existing_doc = db.get_document_by_hash(document_hash)
         if existing_doc:
             already_exists = True
     except Exception:
-        pass  # If DB check fails, continue anyway
+        pass
 
-    # Upload to storage (optional)
+    # Upload to cloud storage if configured
     storage_url = None
     if storage := get_storage():
         try:
             storage_url = storage.upload_pdf(pdf_content, file.filename, document_hash)
         except:
-            pass  # Storage is optional for PoC
+            pass
 
-    # Process
     extracted_text, structured_fields, additional_data, is_valid, validation_message = process_document(
         pdf_content, file.filename
     )
 
-    # Store temporarily
+    # Keep extracted data in memory for the save endpoint
     _extracted_documents[document_hash] = {
         "filename": file.filename,
         "storage_url": storage_url,
@@ -108,7 +106,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
     data = _extracted_documents[request.document_hash]
     fields = request.structured_fields or data["structured_fields"]
 
-    # Check if already saved (race condition protection)
+    # Prevent duplicate saves from concurrent requests
     try:
         if db.get_document_by_hash(request.document_hash):
             del _extracted_documents[request.document_hash]
@@ -116,9 +114,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
     except HTTPException:
         raise
     except Exception:
-        pass  # If check fails, continue anyway
-
-    # Save to database
+        pass
     try:
         document = db.save_document(
             filename=request.filename or data["filename"],
@@ -135,49 +131,72 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_detail)
 
-    # Automatically create model_log entry - EXACT same code as /test-model-log-save endpoint
+    # Create model log entry for quality tracking
     try:
-        from datetime import datetime
         import traceback
 
-        # Use test data exactly like working test endpoint
-        test_data = {
-            "success": True,
-            "document_id": document.id,
-            "document_hash": request.document_hash,
-            "document_link": data.get("storage_url") or "https://example.com/test.pdf",
-            "extraction_result": {
-                "model": "gpt-4o-mini",
-                "timestamp": datetime.now().isoformat(),
-                "raw_response": "Test extraction result from save endpoint"
-            },
-            "original_values": {
-                "tracking_number": "TEST123",
-                "shipper_name": "Test Shipper",
-                "receiver_name": "Test Receiver"
-            },
-            "corrected_values": {
-                "tracking_number": "TEST123",
-                "shipper_name": "Test Shipper",
-                "receiver_name": "Test Receiver"
-            },
-            "corrections_made": None,
-            "failure_reason": None
-        }
+        # Get original and reviewed fields for comparison
+        original_fields = data.get("structured_fields", {})
+        reviewed_fields = fields
 
-        # Write directly to database - EXACT same code as test endpoint
+        def make_json_serializable(val):
+            """Converts Python objects to JSON-compatible types."""
+            if val is None:
+                return None
+            if hasattr(val, 'isoformat'):
+                return val.isoformat()
+            if isinstance(val, (dict, list)):
+                if isinstance(val, dict):
+                    return {k: make_json_serializable(v) for k, v in val.items()}
+                else:
+                    return [make_json_serializable(item) for item in val]
+            return val
+
+        # Compare only editable fields to detect changes
+        corrections_made = {}
+        for key in reviewed_fields.keys():
+            original_val = original_fields.get(key)
+            reviewed_val = reviewed_fields.get(key)
+
+            def normalize_val(v):
+                """Normalizes values for comparison - empty strings become None."""
+                if v is None:
+                    return None
+                if isinstance(v, str):
+                    stripped = v.strip()
+                    return stripped if stripped else None
+                if hasattr(v, 'isoformat'):
+                    return v.isoformat()
+                return str(v) if v else None
+
+            orig_norm = normalize_val(original_val)
+            rev_norm = normalize_val(reviewed_val)
+
+            # Record actual changes, ignoring None/empty comparisons
+            if orig_norm != rev_norm:
+                if orig_norm is not None or rev_norm is not None:
+                    corrections_made[key] = {
+                        "original": make_json_serializable(original_val),
+                        "corrected": make_json_serializable(reviewed_val)
+                    }
+
+        success = len(corrections_made) == 0
+
+        original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
+        reviewed_values_serialized = {k: make_json_serializable(v) for k, v in reviewed_fields.items()}
+
         session = model_log_db.SessionLocal()
         try:
             log_entry = ModelLog(
-                success=test_data["success"],
-                document_id=test_data["document_id"],
-                document_hash=test_data["document_hash"],
-                document_link=test_data["document_link"],
-                extraction_result=test_data["extraction_result"],
-                original_values=test_data["original_values"],
-                corrected_values=test_data["corrected_values"],
-                corrections_made=test_data["corrections_made"],
-                failure_reason=test_data["failure_reason"]
+                success=success,
+                document_id=document.id,
+                document_hash=request.document_hash,
+                document_link=data.get("storage_url"),
+                extraction_result=data.get("additional_data"),
+                original_values=original_values_serialized,
+                corrected_values=reviewed_values_serialized,
+                corrections_made=corrections_made if corrections_made else None,
+                failure_reason=None if success else f"Corrections made to {len(corrections_made)} field(s): {', '.join(corrections_made.keys())}"
             )
 
             session.add(log_entry)
@@ -194,29 +213,27 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
             session.close()
 
     except Exception as e:
-        # Log error but don't fail document save
+        # Model log failure shouldn't block document save
         import traceback
         error_detail = f"Error saving model log: {str(e)}"
         print(f"❌ Model log error in save endpoint: {error_detail}")
         print(traceback.format_exc())
-        # Continue - document save was successful
 
-    # Clean up temporary storage
+    # Remove from temporary cache
     try:
         del _extracted_documents[request.document_hash]
     except KeyError:
-        pass  # Already deleted
+        pass
 
-    # Ensure structured_fields is serializable (convert dates to strings)
+    # Convert date objects to strings for JSON response
     serializable_fields = {}
     try:
         for key, value in fields.items():
             if value is None:
                 serializable_fields[key] = None
-            elif hasattr(value, 'isoformat'):  # Date/datetime objects
+            elif hasattr(value, 'isoformat'):
                 serializable_fields[key] = value.isoformat()
             elif isinstance(value, (dict, list)):
-                # Ensure nested objects are JSON serializable
                 serializable_fields[key] = value
             else:
                 serializable_fields[key] = str(value) if value else None
@@ -224,9 +241,7 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         print(f"Warning: Failed to serialize structured_fields: {str(e)}")
         serializable_fields = None
 
-    # Return response - always return success if document was saved
     try:
-        # Ensure document_id is available
         document_id = document.id if hasattr(document, 'id') and document.id else None
         response = DocumentUploadResponse(
             message="Saved",
@@ -237,11 +252,10 @@ async def save_document(request: DocumentSaveRequest = Body(...)) -> DocumentUpl
         )
         return response
     except Exception as e:
-        # If response serialization fails, still return success but without structured_fields
+        # Fallback response if serialization fails
         import traceback
         print(f"Response serialization error: {str(e)}")
         print(traceback.format_exc())
-        # Get document_id safely
         document_id = None
         try:
             document_id = document.id if hasattr(document, 'id') else None
@@ -330,10 +344,9 @@ async def delete_document(document_id: int) -> Dict[str, str]:
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
 
-            # Store storage URL before deleting from DB
             storage_url = document.storage_url
 
-            # Delete from storage first if URL exists
+            # Try to delete file from cloud storage first
             storage_deleted = False
             if storage_url:
                 try:
@@ -346,9 +359,6 @@ async def delete_document(document_id: int) -> Dict[str, str]:
                             print(f"Warning: File not found in storage or deletion failed: {storage_url}")
                 except Exception as e:
                     print(f"Warning: Error deleting file from storage: {str(e)}")
-                    # Continue with DB deletion even if storage deletion fails
-
-            # Delete from database
             session.delete(document)
             session.commit()
 
@@ -405,9 +415,8 @@ async def test_model_log_save(request: Dict = Body(...)):
         from datetime import datetime
         import traceback
 
-        # Get data from request
         document_hash = request.get("document_hash")
-        document_id = request.get("document_id")  # Get document_id from request if provided
+        document_id = request.get("document_id")
         original_fields = request.get("original_fields", {})
         reviewed_fields = request.get("reviewed_fields", {})
         additional_data = request.get("additional_data", {})
@@ -416,21 +425,20 @@ async def test_model_log_save(request: Dict = Body(...)):
         if not document_hash:
             raise HTTPException(status_code=400, detail="document_hash is required")
 
-        # If document_id not provided, try to find document by hash
+        # Look up document ID if not provided
         if document_id is None:
             try:
                 existing_doc = db.get_document_by_hash(document_hash)
                 if existing_doc:
                     document_id = existing_doc.id
             except Exception:
-                pass  # Document might not be saved yet, that's okay
+                pass
 
-        # Helper function to make values JSON serializable
         def make_json_serializable(val):
-            """Convert values to JSON-serializable format."""
+            """Converts Python objects to JSON-compatible types."""
             if val is None:
                 return None
-            if hasattr(val, 'isoformat'):  # date/datetime objects
+            if hasattr(val, 'isoformat'):
                 return val.isoformat()
             if isinstance(val, (dict, list)):
                 if isinstance(val, dict):
@@ -439,50 +447,38 @@ async def test_model_log_save(request: Dict = Body(...)):
                     return [make_json_serializable(item) for item in val]
             return val
 
-        # Compare original vs reviewed to detect changes
-        # Only compare fields that exist in reviewed_fields (fields the user could edit)
-        # This prevents false positives for fields like shipping_method that aren't in the form
+        # Compare only editable fields to avoid false positives
         corrections_made = {}
         for key in reviewed_fields.keys():
             original_val = original_fields.get(key)
             reviewed_val = reviewed_fields.get(key)
 
-            # Normalize values for comparison - treat empty strings and None as equivalent
             def normalize_val(v):
+                """Normalizes values for comparison - empty strings become None."""
                 if v is None:
                     return None
                 if isinstance(v, str):
                     stripped = v.strip()
-                    # Treat empty strings as None
                     return stripped if stripped else None
-                if hasattr(v, 'isoformat'):  # date/datetime objects
+                if hasattr(v, 'isoformat'):
                     return v.isoformat()
-                # For other types, convert to string but None if falsy
                 return str(v) if v else None
 
             orig_norm = normalize_val(original_val)
             rev_norm = normalize_val(reviewed_val)
 
-            # Only record correction if values are actually different
-            # If both normalize to None/empty, they're the same (no change)
-            # If one is None/empty and the other has a value, that's a change
+            # Record actual changes, ignoring None/empty comparisons
             if orig_norm != rev_norm:
-                # Only record if at least one value is not None/empty (actual change)
-                # This ensures we don't record when both are None/empty (which would be equal)
                 if orig_norm is not None or rev_norm is not None:
                     corrections_made[key] = {
                         "original": make_json_serializable(original_val),
                         "corrected": make_json_serializable(reviewed_val)
                     }
 
-        # Determine success: true if no corrections were made
         success = len(corrections_made) == 0
 
-        # Make fields JSON serializable for storage
         original_values_serialized = {k: make_json_serializable(v) for k, v in original_fields.items()}
         reviewed_values_serialized = {k: make_json_serializable(v) for k, v in reviewed_fields.items()}
-
-        # Write directly to database - EXACT same code as save endpoint
         session = model_log_db.SessionLocal()
         try:
             log_entry = ModelLog(
@@ -532,7 +528,7 @@ async def test_model_log_save(request: Dict = Body(...)):
 async def list_model_logs(limit: int = 100, offset: int = 0):
     """List all model logs in database."""
     try:
-        # First check if table exists using metadata inspection
+        # Verify table exists before querying
         from sqlalchemy import inspect
         inspector = inspect(model_log_db.engine)
         table_name = os.getenv("DB_MODEL_NAME", "model_log")
@@ -547,7 +543,6 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
                 "message": "Model log table does not exist yet. Please create it using infra/model_log.sql"
             }
 
-        # Table exists - proceed with query
         with model_log_db.get_session() as session:
             logs = session.query(ModelLog).order_by(
                 ModelLog.created_at.desc()
@@ -555,7 +550,6 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
 
             total = session.query(ModelLog).count()
 
-            # Return results (even if empty - table exists but has no rows)
             return {
                 "total": total,
                 "count": len(logs),
@@ -577,7 +571,7 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
     except HTTPException:
         raise
     except Exception as e:
-        # If metadata inspection fails, fall back to exception-based detection
+        # Handle table missing errors gracefully
         error_str = str(e)
         if "does not exist" in error_str.lower() or "undefinedtable" in error_str.lower():
             return {
@@ -587,7 +581,6 @@ async def list_model_logs(limit: int = 100, offset: int = 0):
                 "logs": [],
                 "message": "Model log table does not exist yet. Please create it using infra/model_log.sql"
             }
-        # Log the actual error for debugging
         import traceback
         print(f"Unexpected error in list_model_logs: {str(e)}")
         print(traceback.format_exc())
@@ -620,24 +613,20 @@ async def get_model_log(log_id: int) -> Dict:
         raise
     except Exception as e:
         error_str = str(e)
-        # Check if table doesn't exist
         if "does not exist" in error_str.lower() or "undefinedtable" in error_str.lower():
             raise HTTPException(status_code=404, detail="Model log table does not exist yet. Please create it using infra/model_log.sql")
-        # Other errors still raise exception
         raise HTTPException(status_code=500, detail=f"Error fetching model log: {str(e)}")
 
 
 @router.get("/health")
 async def health_check() -> Dict[str, str]:
     """Health check."""
-    # Check main database
     db_status = "connected" if db.check_connection() else "disconnected"
 
-    # Check model log database - verify both connection AND table existence
+    # Verify model log table exists, not just connection
     model_log_db_status = "unknown"
     try:
         if model_log_db.check_connection():
-            # Connection works, now check if table exists
             from sqlalchemy import inspect
             inspector = inspect(model_log_db.engine)
             table_name = os.getenv("DB_MODEL_NAME", "model_log")
@@ -646,19 +635,17 @@ async def health_check() -> Dict[str, str]:
             if table_exists:
                 model_log_db_status = "connected"
             else:
-                model_log_db_status = "disconnected"  # Table doesn't exist
+                model_log_db_status = "disconnected"
         else:
             model_log_db_status = "disconnected"
     except Exception as e:
         model_log_db_status = "disconnected"
         print(f"Model log DB health check error: {str(e)}")
 
-    # Check storage bucket
     bucket_status = "unknown"
     try:
         storage = get_storage()
         if storage:
-            # Try to check if bucket is accessible
             bucket_status = "connected"
         else:
             bucket_status = "not_configured"
