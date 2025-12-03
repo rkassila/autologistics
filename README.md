@@ -1,6 +1,6 @@
 # Logistics Automation Backend
 
-FastAPI backend for logistics document processing with PDF extraction, structured field parsing using OpenAI, and model quality tracking.
+FastAPI backend for logistics document processing with PDF extraction, structured field parsing using OpenAI, PostgreSQL & bucket cloud storage and model quality tracking.
 
 **Frontend Repository:** [autologistics-front](https://github.com/rkassila/autologistics-front)
 
